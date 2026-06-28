@@ -17,7 +17,7 @@ local settings = {
     unwalkActive = false,
     tpUiOpen = false,
     tpPlayerUiOpen = false,
-    godFarmVisible = false, -- Neuer Status für die Farm UI im Teleport Tab
+    godFarmVisible = false, -- Status für die Farm UI im Teleport Tab
     currentSpeed = 16
 }
 
@@ -158,11 +158,10 @@ end
 -- ==========================================
 local NHButton = Instance.new("TextButton")
 local NHCorner = Instance.new("UICorner")
-local NHStroke = Instance.new("UIStroke")
-
 NHButton.Name = "NHButton"
 NHButton.Parent = ScreenGui
-NHButton.Position = UDim2.new(0.02, 0, 0.25, 0)
+-- Unten links positioniert, um andere UI-Elemente im oberen Bereich nicht zu verdecken
+NHButton.Position = UDim2.new(0.02, 0, 0.85, 0)
 NHButton.Size = UDim2.new(0, 45, 0, 45)
 NHButton.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
 NHButton.Font = Enum.Font.GothamBold
@@ -173,6 +172,7 @@ NHButton.TextSize = 16
 NHCorner.CornerRadius = UDim.new(1, 0)
 NHCorner.Parent = NHButton
 
+local NHStroke = Instance.new("UIStroke")
 NHStroke.Color = Color3.fromRGB(200, 50, 50)
 NHStroke.Thickness = 2
 NHStroke.Parent = NHButton
@@ -204,7 +204,7 @@ local TitleLabel = Instance.new("TextLabel")
 
 MainFrame.Name = "MainFrame"
 MainFrame.Parent = ScreenGui
-MainFrame.Position = UDim2.new(0.1, 0, 0.25, 0)
+MainFrame.Position = UDim2.new(0.1, 0, 0.45, 0)
 MainFrame.Size = UDim2.new(0, 500, 0, 280)
 MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 22)
 MainFrame.Active = true
@@ -310,7 +310,7 @@ setupTabButton("Teleport", 3)
 setupTabButton("Credits", 4)
 
 Pages["Player"].Visible = true
-TabBar:GetChildren()[2].TextColor3 = Color3.fromRGB(200, 50, 50)
+TabBar:GetChildren()[1].TextColor3 = Color3.fromRGB(200, 50, 50)
 
 -- ==========================================
 -- UNIVERSAL TOGGLES (Player Tab)
@@ -375,7 +375,7 @@ end)
 local SpeedUiFrame = Instance.new("Frame")
 SpeedUiFrame.Name = "SpeedUiFrame"
 SpeedUiFrame.Size = UDim2.new(0, 220, 0, 130)
-SpeedUiFrame.Position = UDim2.new(0.5, -230, 0.25, 0)
+SpeedUiFrame.Position = UDim2.new(0.5, -230, 0.45, 0)
 SpeedUiFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 SpeedUiFrame.BackgroundTransparency = 0.95
 SpeedUiFrame.Active = true
@@ -413,7 +413,7 @@ local ApplySpeedButton = Instance.new("TextButton")
 local ApplySpeedCorner = Instance.new("UICorner")
 ApplySpeedButton.Size = UDim2.new(0, 85, 0, 32)
 ApplySpeedButton.Position = UDim2.new(0, 20, 0, 80)
-ApplySpeedButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50) -- Rot
+ApplySpeedButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
 ApplySpeedButton.Font = Enum.Font.GothamBold
 ApplySpeedButton.Text = "SET SPEED"
 ApplySpeedButton.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -446,7 +446,7 @@ end)
 local ServerHopButton = Instance.new("TextButton")
 local ServerHopCorner = Instance.new("UICorner")
 ServerHopButton.Size = UDim2.new(0, 165, 0, 40)
-ServerHopButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50) -- Rot
+ServerHopButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
 ServerHopButton.Font = Enum.Font.GothamBold
 ServerHopButton.Text = "Server Hop ↻"
 ServerHopButton.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -467,7 +467,7 @@ end)
 local GodFarmFrame = Instance.new("Frame")
 GodFarmFrame.Name = "GodFarmFrame"
 GodFarmFrame.Size = UDim2.new(0, 170, 0, 280)
-GodFarmFrame.Position = UDim2.new(0.5, 240, 0.25, 0)
+GodFarmFrame.Position = UDim2.new(0.5, 240, 0.45, 0)
 GodFarmFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
 GodFarmFrame.Visible = false
 GodFarmFrame.Parent = ScreenGui
@@ -505,6 +505,52 @@ local Btn3, Stroke3 = erstelleFarmButton("Punkt 3 setzen", 95, Color3.fromRGB(25
 local Btn4, Stroke4 = erstelleFarmButton("Punkt 4 (Win) setzen", 135, Color3.fromRGB(0, 255, 255))
 local BtnStart, StrokeStart = erstelleFarmButton("START", 190, Color3.fromRGB(75, 255, 75))
 local BtnReset, StrokeReset = erstelleFarmButton("RESET PUNKTE", 235, Color3.fromRGB(255, 75, 75))
+
+-- ==========================================
+-- FUNKTION: HIER WERDEN DIE WINS AUSGELESEN
+-- ==========================================
+local function holeAktuelleWins()
+    local leaderstats = player:FindFirstChild("leaderstats")
+    if leaderstats then
+        for _, v in pairs(leaderstats:GetChildren()) do
+            if string.find(string.lower(v.Name), "win") then return v.Value end
+        end
+    end
+    return 0
+end
+
+-- ==========================================
+-- ANTI-CHEAT / WIN VALIDIERUNGSSYSTEM
+-- ==========================================
+-- Da manche Anti-Cheat-Systeme das ständige Teleportieren blockieren oder Wins nicht zählen,
+-- wird hier eine Sicherheitsüberwachung eingefügt. Wenn das Spiel Runden ohne Win registriert,
+-- erfolgt ein automatischer Reconnect/Rejoin.
+local sicherheitsWinsCache = holeAktuelleWins()
+local rundenOhneErfolg = 0
+
+local function ueberwacheWinFortschritt()
+    local neueWins = holeAktuelleWins()
+    if neueWins > sicherheitsWinsCache then
+        sicherheitsWinsCache = neueWins
+        rundenOhneErfolg = 0
+        return true
+    else
+        rundenOhneErfolg = rundenOhneErfolg + 1
+        return false
+    end
+end
+
+-- ==========================================
+-- FUNKTION: REJOIN SERVER
+-- ==========================================
+local function serverRejoin()
+    print("Anti-Cheat blockiert Win-Zählung! Rejoin auf denselben Server läuft...")
+    if game.JobId ~= "" then
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, player)
+    else
+        TeleportService:Teleport(game.PlaceId, player)
+    end
+end
 
 -- ==========================================
 -- FARM LOGIK & PUNKTE-SYSTEM
@@ -616,7 +662,7 @@ BtnStart.MouseButton1Click:Connect(triggerStart)
 local PlayerTPWindow = Instance.new("Frame")
 PlayerTPWindow.Name = "PlayerTPWindow"
 PlayerTPWindow.Size = UDim2.new(0, 250, 0, 300)
-PlayerTPWindow.Position = UDim2.new(0.5, 240, 0.25, 0)
+PlayerTPWindow.Position = UDim2.new(0.5, 240, 0.45, 0)
 PlayerTPWindow.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
 PlayerTPWindow.BorderSizePixel = 0
 PlayerTPWindow.Active = true
@@ -666,7 +712,7 @@ local function updatePlayerList()
                 for _, btn in pairs(PTPScrollFrame:GetChildren()) do
                     if btn:IsA("TextButton") then btn.BackgroundColor3 = Color3.fromRGB(40, 40, 45) end
                 end
-                pButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50) -- Rot
+                pButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
             end)
         end
     end
@@ -674,7 +720,7 @@ end
 
 local PTPExecuteButton = Instance.new("TextButton")
 PTPExecuteButton.Size = UDim2.new(1, -20, 0, 40) PTPExecuteButton.Position = UDim2.new(0, 10, 1, -50)
-PTPExecuteButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50) -- Rot
+PTPExecuteButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
 PTPExecuteButton.Text = "Zu Spieler teleportieren" PTPExecuteButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 PTPExecuteButton.TextSize = 14 PTPExecuteButton.Font = Enum.Font.GothamBold PTPExecuteButton.Parent = PlayerTPWindow
 
@@ -715,7 +761,7 @@ local function applyHighlightToCharacter(char)
         local highlight = Instance.new("Highlight")
         highlight.Name = "NotixEspObject"
         highlight.Adornee = char
-        highlight.FillColor = Color3.fromRGB(200, 50, 50) -- Rot
+        highlight.FillColor = Color3.fromRGB(200, 50, 50)
         highlight.FillTransparency = 0.4
         highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
         highlight.OutlineTransparency = 0.2
@@ -769,7 +815,7 @@ CreditsLabel.Parent = creditsPage
 local TPSaverFrame = Instance.new("Frame")
 TPSaverFrame.Name = "TPSaverFrame"
 TPSaverFrame.Size = UDim2.new(0, 220, 0, 240)
-TPSaverFrame.Position = UDim2.new(0.5, -230, 0.25, 0) 
+TPSaverFrame.Position = UDim2.new(0.5, -230, 0.45, 0) 
 TPSaverFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 28)
 TPSaverFrame.Active = true TPSaverFrame.Draggable = true TPSaverFrame.Visible = false TPSaverFrame.Parent = ScreenGui
 
@@ -791,7 +837,7 @@ local TPList = Instance.new("UIListLayout") TPList.Parent = TPContent TPList.Hor
 local TabContainer = Instance.new("Frame") TabContainer.Size = UDim2.new(0, 180, 0, 30) TabContainer.BackgroundTransparency = 1 TabContainer.Parent = TPContent
 
 local Tab1Button = Instance.new("TextButton")
-Tab1Button.Size = UDim2.new(0, 85, 1, 0) Tab1Button.BackgroundColor3 = Color3.fromRGB(200, 50, 50) -- Rot
+Tab1Button.Size = UDim2.new(0, 85, 1, 0) Tab1Button.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
 Tab1Button.Text = "Point 1" Tab1Button.TextColor3 = Color3.fromRGB(255, 255, 255) Tab1Button.Font = Enum.Font.GothamBold Tab1Button.Parent = TabContainer
 local T1C = Instance.new("UICorner") T1C.CornerRadius = UDim.new(0,6) T1C.Parent = Tab1Button
 
@@ -802,7 +848,7 @@ Tab2Button.TextColor3 = Color3.fromRGB(180, 180, 180) Tab2Button.Font = Enum.Fon
 local T2C = Instance.new("UICorner") T2C.CornerRadius = UDim.new(0,6) T2C.Parent = Tab2Button
 
 local TPButton = Instance.new("TextButton")
-TPButton.Size = UDim2.new(0, 180, 0, 35) TPButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50) -- Rot
+TPButton.Size = UDim2.new(0, 180, 0, 35) TPButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
 TPButton.Text = "TP" TPButton.TextColor3 = Color3.fromRGB(255, 255, 255) TPButton.Font = Enum.Font.GothamBold TPButton.Parent = TPContent
 local TPC = Instance.new("UICorner") TPC.CornerRadius = UDim.new(0,8) TPC.Parent = TPButton
 
@@ -817,19 +863,6 @@ AutoTPButton.Size = UDim2.new(0, 180, 0, 35) AutoTPButton.BackgroundColor3 = Col
 AutoTPButton.Text = "Auto-TP: OFF" AutoTPButton.TextColor3 = Color3.fromRGB(200, 200, 200)
 AutoTPButton.Font = Enum.Font.GothamBold AutoTPButton.Parent = TPContent
 AutoCorner.CornerRadius = UDim.new(0, 8) AutoCorner.Parent = AutoTPButton
-
--- ==========================================
--- FUNKTION: HIER WERDEN DIE WINS AUSGELESEN
--- ==========================================
-local function holeAktuelleWins()
-    local leaderstats = player:FindFirstChild("leaderstats")
-    if leaderstats then
-        for _, v in pairs(leaderstats:GetChildren()) do
-            if string.find(string.lower(v.Name), "win") then return v.Value end
-        end
-    end
-    return 0
-end
 
 -- ==========================================
 -- FUNKTION: REJOIN SERVER
@@ -932,7 +965,7 @@ task.spawn(function()
                 standstillTime = standstillTime + 0.02
                 if standstillTime >= 3.0 then
                     humanoid.Jump = true
-                    standstillTime = 0
+                    standstillstandTime = 0
                 end
             else
                 letztePosition = meinPos
@@ -943,20 +976,19 @@ task.spawn(function()
                 local distanzSeitDrop = (meinPos - dropPosition).Magnitude
                 if distanzSeitDrop > 35 then
                     task.wait(0.5)
-                    local aktuelleWins = holeAktuelleWins()
                     
-                    if aktuelleWins > letzteWins then
-                        rundenOhneWin = 0
-                        letzteWins = aktuelleWins
-                        print("Win registriert! Runden-Fehler resettet.")
+                    -- Anti-Cheat Win-Validierung ausführen
+                    if ueberwacheWinFortschritt() then
+                        rundenOhneErfolg = 0
+                        print("Win regulär im Leaderboard registriert!")
                     else
-                        rundenOhneWin = rundenOhneWin + 1
-                        print("Kein Win registriert! Fehlversuche: " .. rundenOhneWin .. "/" .. maximalFehlversuche)
-                        if rundenOhneWin >= maximalFehlversuche then
+                        print("Win wird blockiert. Runden ohne Erfolg: " .. rundenOhneErfolg .. "/" .. maximalFehlversuche)
+                        if rundenOhneErfolg >= maximalFehlversuche then
                             serverRejoin()
                             return
                         end
                     end
+                    
                     wartetAufTeleport = false
                     aktuellerIndex = 1
                 else
