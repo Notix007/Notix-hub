@@ -313,7 +313,7 @@ Pages["Player"].Visible = true
 TabBar:GetChildren()[2].TextColor3 = Color3.fromRGB(200, 50, 50)
 
 -- ==========================================
--- UNIVERSAL TOGGLES (Player Tab) (Rot gefärbt)
+-- UNIVERSAL TOGGLES (Player Tab)
 -- ==========================================
 
 createToggle(playerPage, "playerEspActive", "Player ESP", 1, function(state)
@@ -331,8 +331,7 @@ createToggle(playerPage, "speedSystemActive", "Speed Custom", 2, function(state)
 end)
 
 createToggle(playerPage, "unwalkActive", "Unwalk", 3, function(state)
-    if animTrackConnection = animTrackConnection
-    if ifTrackConnection then 
+    if animTrackConnection then 
         animTrackConnection:Disconnect() 
         animTrackConnection = nil 
     end
@@ -340,7 +339,7 @@ createToggle(playerPage, "unwalkActive", "Unwalk", 3, function(state)
         local animator = player.Character:FindFirstChildOfClass("Humanoid"):FindFirstChildOfClass("Animator")
         if animator then
             for _, track in pairs(animator:GetPlayingAnimationTracks()) do
-                if track.Name:lower():find("walk") or track.Name:lower():find("run") then track:Stop() end
+                if track.Name:lower():find("walk") or track.Name:lower():find("run") then track.Stop() end
             end
             animTrackConnection = animator.AnimationPlayed:Connect(function(track)
                 if settings.unwalkActive and (track.Name:lower():find("walk") or track.Name:lower():find("run")) then
@@ -743,7 +742,6 @@ for _, p in pairs(Players:GetPlayers()) do monitorPlayer(p) end
 Players.PlayerAdded:Connect(monitorPlayer)
 
 RunService.Heartbeat:Connect(function()
-    -- Universelles ESP checken
     for _, p in pairs(Players:GetPlayers()) do
         if p.Character and p ~= player then
             local hl = p.Character:FindFirstChild("NotixEspObject")
