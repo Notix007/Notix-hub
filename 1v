@@ -1,5 +1,5 @@
 -- ==========================================
--- UNIVERSAL NOTIX HUB (OPTIMIZED & ENHANCED)
+-- UNIVERSAL NOTIX HUB - INTEGRATED VERSION
 -- ==========================================
 
 repeat task.wait() until game:IsLoaded()
@@ -7,7 +7,6 @@ repeat task.wait() until game:IsLoaded()
 -- Global Settings & Config Setup
 local folderName = "NotixHub"
 local fileName = folderName .. "/config_UNIVERSAL.json"
-local FARM_DATEI_NAME = "PerfectFarmPositions.json"
 
 local settings = {
     playerEspActive = false,
@@ -18,7 +17,7 @@ local settings = {
     unwalkActive = false,
     tpUiOpen = false,
     tpPlayerUiOpen = false,
-    farmActive = false,
+    godFarmVisible = false, -- Neuer Status für die Farm UI im Teleport Tab
     currentSpeed = 16
 }
 
@@ -28,18 +27,6 @@ local activeToggles = {}
 local espHighlights = {}
 local animTrackConnection = nil
 
--- Farm System Variablen
-local punkte = {nil, nil, nil, nil}
-local gueltigePunkte = {}
-local farmAktuellerIndex = 1
-local wartetAufTeleport = false
-local dropPosition = Vector3.new(0,0,0)
-local letztePosition = Vector3.new(0,0,0)
-local stillstandZeit = 0
-local letzteWins = 0
-local rundenOhneWin = 0
-local maximalFehlversuche = 5
-
 -- Fetch Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -48,8 +35,11 @@ local TweenService = game:GetService("TweenService")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
+
+-- Charakter-Variablen für die Farm-Logik
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoid = character:WaitForChild("Humanoid")
 local rootPart = character:WaitForChild("HumanoidRootPart")
@@ -58,11 +48,23 @@ player.CharacterAdded:Connect(function(newCharacter)
     character = newCharacter
     humanoid = newCharacter:WaitForChild("Humanoid")
     rootPart = newCharacter:WaitForChild("HumanoidRootPart")
-    
-    task.wait(0.2)
-    defaultSpeed = humanoid.WalkSpeed
-    if settings.speedSystemActive then humanoid.WalkSpeed = settings.currentSpeed end
 end)
+
+-- Speicher für die Farm-Punkte
+local punkte = {nil, nil, nil, nil}
+local gueltigePunkte = {}
+local aktuellerIndex = 1
+local laeuft = false
+
+local wartetAufTeleport = false
+local dropPosition = Vector3.new(0,0,0)
+local letztePosition = Vector3.new(0,0,0)
+local standstillTime = 0
+
+local letzteWins = 0
+local rundenOhneWin = 0
+local maximalFehlversuche = 5
+local DATEI_NAME = "PerfectFarmPositions.json"
 
 -- Clean up existing UI instances to prevent rendering bugs
 if CoreGui:FindFirstChild("NotixHub") then
@@ -75,7 +77,7 @@ ScreenGui.Name = "NotixHub"
 ScreenGui.Parent = CoreGui
 ScreenGui.ResetOnSpawn = false
 
--- Save/Load Functions
+-- Save Function
 local function saveSettings()
     if writefile then
         if makefolder then makefolder(folderName) end
@@ -84,66 +86,37 @@ local function saveSettings()
     end
 end
 
-local function speichereFarmPunkte()
-    local daten = {}
-    for i = 1, 4 do
-        if punkte[i] then
-            daten[tostring(i)] = {punkte[i].X, punkte[i].Y, punkte[i].Z}
-        end
-    end
-    if writefile then
-        writefile(FARM_DATEI_NAME, HttpService:JSONEncode(daten))
-    end
-end
-
-local function ladeFarmPunkte()
-    if isfile and isfile(FARM_DATEI_NAME) then
-        local inhalt = readfile(FARM_DATEI_NAME)
-        local erfolg, daten = pcall(function() return HttpService:JSONDecode(inhalt) end)
-        if erfolg and type(daten) == "table" then
-            for i = 1, 4 do
-                if daten[tostring(i)] then
-                    local p = daten[tostring(i)]
-                    punkte[i] = Vector3.new(p[1], p[2], p[3])
-                end
-            end
-            return true
-        end
-    end
-    return false
-end
-
--- Smooth Toggle Animator
+-- Update Toggle Visuals
 local function updateToggleVisual(switchBtn, ballFrame, isNowActive)
     if isNowActive then
         TweenService:Create(switchBtn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(200, 50, 50)}):Play()
-        TweenService:Create(ballFrame, TweenInfo.new(0.2), {Position = UDim2.new(1, -17, 0, 3)}):Play()
+        TweenService:Create(ballFrame, TweenInfo.new(0.2), {Position = UDim2.new(1, -19, 0, 3)}):Play()
     else
-        TweenService:Create(switchBtn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(45, 45, 50)}):Play()
+        TweenService:Create(switchBtn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(50, 50, 55)}):Play()
         TweenService:Create(ballFrame, TweenInfo.new(0.2), {Position = UDim2.new(0, 3, 0, 3)}):Play()
     end
 end
 
--- HELPER FUNCTION: Erstellt ein Toggle-Element fürs Grid-Layout
+-- HELPER: Erstellt ein Toggle-Element fürs Grid-Layout
 local function createToggle(parent, settingKey, labelText, layoutOrder, onClickCallback)
     local Frame = Instance.new("Frame")
-    Frame.Size = UDim2.new(0, 165, 0, 42)
+    Frame.Size = UDim2.new(0, 165, 0, 40)
     Frame.BackgroundTransparency = 0.95
-    Frame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+    Frame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     Frame.LayoutOrder = layoutOrder
     Frame.Parent = parent
     
     local FrameCorner = Instance.new("UICorner")
-    FrameCorner.CornerRadius = UDim.new(0, 8)
+    FrameCorner.CornerRadius = UDim.new(0, 6)
     FrameCorner.Parent = Frame
 
     local Label = Instance.new("TextLabel")
     Label.Size = UDim2.new(1, -55, 1, 0)
-    Label.Position = UDim2.new(0, 10, 0, 0)
+    Label.Position = UDim2.new(0, 8, 0, 0)
     Label.BackgroundTransparency = 1
     Label.Font = Enum.Font.GothamBold
     Label.Text = labelText
-    Label.TextColor3 = Color3.fromRGB(220, 220, 225)
+    Label.TextColor3 = Color3.fromRGB(200, 200, 205)
     Label.TextSize = 12
     Label.TextXAlignment = Enum.TextXAlignment.Left
     Label.Parent = Frame
@@ -153,9 +126,9 @@ local function createToggle(parent, settingKey, labelText, layoutOrder, onClickC
     local SwitchBall = Instance.new("Frame")
     local BallCorner = Instance.new("UICorner")
 
-    Switch.Size = UDim2.new(0, 38, 0, 20)
-    Switch.Position = UDim2.new(1, -44, 0, 11)
-    Switch.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
+    Switch.Size = UDim2.new(0, 40, 0, 20)
+    Switch.Position = UDim2.new(1, -46, 0, 10)
+    Switch.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
     Switch.Text = ""
     Switch.Parent = Frame
     SwitchCorner.CornerRadius = UDim.new(1, 0)
@@ -181,7 +154,7 @@ local function createToggle(parent, settingKey, labelText, layoutOrder, onClickC
 end
 
 -- ==========================================
--- RUNDER DRAGGABLE "NH" BUTTON
+-- RUNDER DRAGGABLE "NH" BUTTON (Rot)
 -- ==========================================
 local NHButton = Instance.new("TextButton")
 local NHCorner = Instance.new("UICorner")
@@ -190,8 +163,8 @@ local NHStroke = Instance.new("UIStroke")
 NHButton.Name = "NHButton"
 NHButton.Parent = ScreenGui
 NHButton.Position = UDim2.new(0.02, 0, 0.25, 0)
-NHButton.Size = UDim2.new(0, 48, 0, 48)
-NHButton.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+NHButton.Size = UDim2.new(0, 45, 0, 45)
+NHButton.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
 NHButton.Font = Enum.Font.GothamBold
 NHButton.Text = "NH"
 NHButton.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -222,7 +195,7 @@ UIS.InputChanged:Connect(function(input)
 end)
 
 -- ==========================================
--- MAIN HUB FRAME (MODERN & LARGE DESIGN)
+-- MAIN HUB FRAME (GRID LAYOUT)
 -- ==========================================
 local MainFrame = Instance.new("Frame")
 local MainCorner = Instance.new("UICorner")
@@ -231,49 +204,34 @@ local TitleLabel = Instance.new("TextLabel")
 
 MainFrame.Name = "MainFrame"
 MainFrame.Parent = ScreenGui
-MainFrame.Position = UDim2.new(0.2, 0, 0.25, 0)
-MainFrame.Size = UDim2.new(0, 560, 0, 360) -- Größere UI für besseren Platzkomfort
-MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
+MainFrame.Position = UDim2.new(0.1, 0, 0.25, 0)
+MainFrame.Size = UDim2.new(0, 500, 0, 280)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 22)
 MainFrame.Active = true
+MainFrame.Draggable = true
 
-MainCorner.CornerRadius = UDim.new(0, 12)
+MainCorner.CornerRadius = UDim.new(0, 10)
 MainCorner.Parent = MainFrame
 
-MainStroke.Color = Color3.fromRGB(35, 35, 40)
-MainStroke.Thickness = 1.5
+MainStroke.Color = Color3.fromRGB(40, 40, 45)
+MainStroke.Thickness = 1
 MainStroke.Parent = MainFrame
-
--- Dragging Logic für MainFrame
-local mfDragging, mfDragStart, mfStartPos, mfDragInput
-MainFrame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        mfDragging = true; mfDragStart = input.Position; mfStartPos = MainFrame.Position
-        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then mfDragging = false end end)
-    end
-end)
-MainFrame.InputChanged:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then mfDragInput = input end end)
-UIS.InputChanged:Connect(function(input)
-    if input == mfDragInput and mfDragging then
-        local delta = input.Position - mfDragStart
-        MainFrame.Position = UDim2.new(mfStartPos.X.Scale, mfStartPos.X.Offset + delta.X, mfStartPos.Y.Scale, mfStartPos.Y.Offset + delta.Y)
-    end
-end)
 
 TitleLabel.Name = "TitleLabel"
 TitleLabel.Parent = MainFrame
-TitleLabel.Size = UDim2.new(1, -20, 0, 40)
-TitleLabel.Position = UDim2.new(0, 16)
+TitleLabel.Size = UDim2.new(1, -20, 0, 35)
+TitleLabel.Position = UDim2.new(0, 15, 0, 0)
 TitleLabel.BackgroundTransparency = 1
 TitleLabel.Font = Enum.Font.GothamBold
-TitleLabel.Text = "NOTIX HUB — UNIVERSAL EDITION"
+TitleLabel.Text = "NOTIX HUB"
 TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 TitleLabel.TextSize = 14
 TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
 
 local Line = Instance.new("Frame")
 Line.Size = UDim2.new(1, 0, 0, 1)
-Line.Position = UDim2.new(0, 0, 0, 40)
-Line.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+Line.Position = UDim2.new(0, 0, 0, 35)
+Line.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
 Line.BorderSizePixel = 0
 Line.Parent = MainFrame
 
@@ -283,21 +241,21 @@ Line.Parent = MainFrame
 local TabBar = Instance.new("Frame")
 TabBar.Name = "TabBar"
 TabBar.Parent = MainFrame
-TabBar.Position = UDim2.new(0, 0, 0, 41)
-TabBar.Size = UDim2.new(0, 130, 1, -41)
-TabBar.BackgroundColor3 = Color3.fromRGB(20, 20, 24)
+TabBar.Position = UDim2.new(0, 0, 0, 36)
+TabBar.Size = UDim2.new(0, 120, 1, -36)
+TabBar.BackgroundColor3 = Color3.fromRGB(24, 24, 26)
 TabBar.BorderSizePixel = 0
 
 local TabListLayout = Instance.new("UIListLayout")
 TabListLayout.Parent = TabBar
 TabListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-TabListLayout.Padding = UDim.new(0, 4)
+TabListLayout.Padding = UDim.new(0, 2)
 
 local ContentContainer = Instance.new("Frame")
 ContentContainer.Name = "ContentContainer"
 ContentContainer.Parent = MainFrame
-ContentContainer.Position = UDim2.new(0, 145, 0, 55)
-ContentContainer.Size = UDim2.new(1, -160, 1, -70)
+ContentContainer.Position = UDim2.new(0, 130, 0, 45)
+ContentContainer.Size = UDim2.new(1, -140, 1, -55)
 ContentContainer.BackgroundTransparency = 1
 
 local Pages = {}
@@ -306,18 +264,15 @@ local function createPage(name)
     Page.Name = name .. "Page"
     Page.Size = UDim2.new(1, 0, 1, 0)
     Page.BackgroundTransparency = 1
-    Page.ScrollBarThickness = 2
-    Page.ScrollBarImageColor3 = Color3.fromRGB(50, 50, 55)
-    Page.CanvasSize = UDim2.new(0, 0, 0, 0)
-    Page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    Page.ScrollBarThickness = 0
     Page.Visible = false
     Page.Parent = ContentContainer
     
     local GridLayout = Instance.new("UIGridLayout")
     GridLayout.Parent = Page
     GridLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    GridLayout.CellSize = UDim2.new(0, 185, 0, 44)
-    GridLayout.CellPadding = UDim2.new(0, 15, 0, 12)
+    GridLayout.CellSize = UDim2.new(0, 172, 0, 42)
+    GridLayout.CellPadding = UDim2.new(0, 12, 0, 10)
     
     Pages[name] = Page
     return Page
@@ -328,42 +283,24 @@ local antiPage = createPage("Anti")
 local teleportPage = createPage("Teleport")
 local creditsPage = createPage("Credits")
 
--- Layouts modifizieren für Spezial-Inhalte
-Pages["Teleport"]:FindFirstChildOfClass("UIGridLayout"):Destroy()
-local TeleportListLayout = Instance.new("UIListLayout")
-TeleportListLayout.Parent = Pages["Teleport"]
-TeleportListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-TeleportListLayout.Padding = UDim.new(0, 10)
-
 local function setupTabButton(name, order)
     local Button = Instance.new("TextButton")
-    Button.Size = UDim2.new(1, -10, 0, 38)
-    Button.Position = UDim2.new(0, 5, 0, 0)
+    Button.Size = UDim2.new(1, 0, 0, 35)
     Button.BackgroundTransparency = 1
     Button.Font = Enum.Font.GothamBold
-    Button.Text = "  " .. name
-    Button.TextColor3 = Color3.fromRGB(140, 140, 145)
+    Button.Text = name
+    Button.TextColor3 = Color3.fromRGB(130, 130, 135)
     Button.TextSize = 13
-    Button.TextXAlignment = Enum.TextXAlignment.Left
     Button.LayoutOrder = order
     Button.Parent = TabBar
-    
-    local btnCorner = Instance.new("UICorner")
-    btnCorner.CornerRadius = UDim.new(0, 6)
-    btnCorner.Parent = Button
     
     Button.MouseButton1Click:Connect(function()
         for _, p in pairs(Pages) do p.Visible = false end
         for _, b in pairs(TabBar:GetChildren()) do 
-            if b:IsA("TextButton") then 
-                b.TextColor3 = Color3.fromRGB(140, 140, 145)
-                b.BackgroundTransparency = 1
-            end
+            if b:IsA("TextButton") then b.TextColor3 = Color3.fromRGB(130, 130, 135) end
         end
         Pages[name].Visible = true
-        Button.TextColor3 = Color3.fromRGB(255, 255, 255)
-        Button.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-        Button.BackgroundTransparency = 0.1
+        Button.TextColor3 = Color3.fromRGB(200, 50, 50)
     end)
 end
 
@@ -373,74 +310,34 @@ setupTabButton("Teleport", 3)
 setupTabButton("Credits", 4)
 
 Pages["Player"].Visible = true
-TabBar:GetChildren()[2].TextColor3 = Color3.fromRGB(255, 255, 255)
-TabBar:GetChildren()[2].BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-TabBar:GetChildren()[2].BackgroundTransparency = 0.1
+TabBar:GetChildren()[2].TextColor3 = Color3.fromRGB(200, 50, 50)
 
 -- ==========================================
--- UNIVERSAL PLAYER ESP (ROBUST HIGHLIGHT LOGIC)
+-- UNIVERSAL TOGGLES (Player Tab) (Rot gefärbt)
 -- ==========================================
-local function applyESP(targetPlayer)
-    if targetPlayer == player then return end
-    
-    local function addHighlight(char)
-        if not char then return end
-        
-        -- Warten, bis der Charakter vollständig geladen ist
-        char:WaitForChild("HumanoidRootPart", 5)
-        
-        -- Altes Highlight entfernen, falls vorhanden
-        if espHighlights[targetPlayer] then
-            espHighlights[targetPlayer]:Destroy()
-        end
-        
-        local highlight = Instance.new("Highlight")
-        highlight.Name = "NotixESP"
-        highlight.Adornee = char
-        highlight.FillColor = Color3.fromRGB(200, 50, 50)
-        highlight.FillTransparency = 0.5
-        highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-        highlight.OutlineTransparency = 0.1
-        highlight.Enabled = settings.playerEspActive
-        highlight.Parent = CoreGui -- Im CoreGui sichern, damit Game-Scripts es nicht löschen
-        
-        espHighlights[targetPlayer] = highlight
-    end
-    
-    if targetPlayer.Character then
-        addHighlight(targetPlayer.Character)
-    end
-    targetPlayer.CharacterAdded:Connect(addHighlight)
-end
-
--- ESP Initialisierung & Updates
-for _, p in pairs(Players:GetPlayers()) do applyESP(p) end
-Players.PlayerAdded:Connect(applyESP)
-Players.PlayerRemoving:Connect(function(p)
-    if espHighlights[p] then espHighlights[p]:Destroy() espHighlights[p] = nil end
-end)
 
 createToggle(playerPage, "playerEspActive", "Player ESP", 1, function(state)
-    for _, highlight in pairs(espHighlights) do
-        if highlight then highlight.Enabled = state end
+    for p, highlight in pairs(espHighlights) do
+        if highlight and highlight.Parent then highlight.Enabled = state else espHighlights[p] = nil end
     end
 end)
 
--- ==========================================
--- WEITERE CONFIG TOGGLES
--- ==========================================
 createToggle(playerPage, "speedSystemActive", "Speed Custom", 2, function(state)
     local SpeedUiFrame = ScreenGui:FindFirstChild("SpeedUiFrame")
     if SpeedUiFrame then SpeedUiFrame.Visible = state end
-    if character and humanoid then
-        humanoid.WalkSpeed = state and settings.currentSpeed or defaultSpeed
+    if player.Character and player.Character:FindFirstChildOfClass("Humanoid") then
+        player.Character:FindFirstChildOfClass("Humanoid").WalkSpeed = settings.speedSystemActive and settings.currentSpeed or defaultSpeed
     end
 end)
 
 createToggle(playerPage, "unwalkActive", "Unwalk", 3, function(state)
-    if animTrackConnection then animTrackConnection:Disconnect() animTrackConnection = nil end
-    if state and humanoid then
-        local animator = humanoid:FindFirstChildOfClass("Animator")
+    if animTrackConnection = animTrackConnection
+    if ifTrackConnection then 
+        animTrackConnection:Disconnect() 
+        animTrackConnection = nil 
+    end
+    if state and player.Character and player.Character:FindFirstChildOfClass("Humanoid") then
+        local animator = player.Character:FindFirstChildOfClass("Humanoid"):FindFirstChildOfClass("Animator")
         if animator then
             for _, track in pairs(animator:GetPlayingAnimationTracks()) do
                 if track.Name:lower():find("walk") or track.Name:lower():find("run") then track:Stop() end
@@ -460,7 +357,7 @@ createToggle(playerPage, "noclipActive", "No Clip", 5, function(state) end)
 createToggle(playerPage, "xrayActive", "X-Ray", 6, function(state)
     if state then
         for _, obj in pairs(workspace:GetDescendants()) do
-            if obj:IsA("BasePart") and not obj:IsDescendantOf(character) and not obj:IsA("Terrain") then
+            if obj:IsA("BasePart") and not obj:IsDescendantOf(player.Character) and not obj:IsA("Terrain") then
                 if not originalTransparencies[obj] then originalTransparencies[obj] = obj.Transparency end
                 obj.Transparency = 0.7 
             end
@@ -474,208 +371,21 @@ createToggle(playerPage, "xrayActive", "X-Ray", 6, function(state)
 end)
 
 -- ==========================================
--- INTERFACING REJOIN & WIN READERS
--- ==========================================
-local function holeAktuelleWins()
-    local leaderstats = player:FindFirstChild("leaderstats")
-    if leaderstats then
-        for _, v in pairs(leaderstats:GetChildren()) do
-            if string.find(string.lower(v.Name), "win") then return v.Value end
-        end
-    end
-    return 0
-end
-
-local function serverRejoin()
-    if game.JobId ~= "" then
-        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, player)
-    else
-        TeleportService:Teleport(game.PlaceId, player)
-    end
-end
-
--- ==========================================
--- INTEGRATION: TELEPORT TAB (WITH GODFARM)
--- ==========================================
-local TopButtonsFrame = Instance.new("Frame")
-TopButtonsFrame.Size = UDim2.new(1, 0, 0, 45)
-TopButtonsFrame.BackgroundTransparency = 1
-TopButtonsFrame.Parent = Pages["Teleport"]
-
-local TopGrid = Instance.new("UIGridLayout")
-TopGrid.CellSize = UDim2.new(0, 185, 0, 42)
-TopGrid.CellPadding = UDim2.new(0, 15, 0, 0)
-TopGrid.Parent = TopButtonsFrame
-
-createToggle(TopButtonsFrame, "tpUiOpen", "TP Saver Menu", 1, function(state)
-    local TPSaverFrame = ScreenGui:FindFirstChild("TPSaverFrame")
-    if TPSaverFrame then TPSaverFrame.Visible = state end
-end)
-
-createToggle(TopButtonsFrame, "tpPlayerUiOpen", "Player TP Window", 2, function(state)
-    local PlayerTPWindow = ScreenGui:FindFirstChild("PlayerTPWindow")
-    if PlayerTPWindow then PlayerTPWindow.Visible = state; if state then updatePlayerList() end end
-end)
-
--- Die Trennlinie zur GodFarm
-local FarmDivider = Instance.new("Frame")
-FarmDivider.Size = UDim2.new(1, -10, 0, 1)
-FarmDivider.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-FarmDivider.BorderSizePixel = 0
-FarmDivider.Parent = Pages["Teleport"]
-
-local FarmTitle = Instance.new("TextLabel")
-FarmTitle.Size = UDim2.new(1, 0, 0, 20)
-FarmTitle.BackgroundTransparency = 1
-FarmTitle.Font = Enum.Font.GothamBold
-FarmTitle.Text = "GODFARM AUTOMATION (SAME SERVER)"
-FarmTitle.TextColor3 = Color3.fromRGB(200, 50, 50)
-FarmTitle.TextSize = 11
-FarmTitle.TextXAlignment = Enum.TextXAlignment.Left
-FarmTitle.Parent = Pages["Teleport"]
-
--- Container für die Farm-Buttons (Grid)
-local FarmButtonsGrid = Instance.new("Frame")
-FarmButtonsGrid.Size = UDim2.new(1, 0, 0, 110)
-FarmButtonsGrid.BackgroundTransparency = 1
-FarmButtonsGrid.Parent = Pages["Teleport"]
-
-local FGrid = Instance.new("UIGridLayout")
-FGrid.CellSize = UDim2.new(0, 185, 0, 36)
-FGrid.CellPadding = UDim2.new(0, 15, 0, 10)
-FGrid.Parent = FarmButtonsGrid
-
-local function createFarmButton(text, fColor)
-    local btn = Instance.new("TextButton")
-    btn.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-    btn.Text = text
-    btn.TextColor3 = fColor
-    btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 12
-    btn.Parent = FarmButtonsGrid
-    
-    local corner = Instance.new("UICorner") corner.CornerRadius = UDim.new(0, 6) corner.Parent = btn
-    local stroke = Instance.new("UIStroke") stroke.Color = Color3.fromRGB(45, 45, 50) stroke.Thickness = 1 stroke.Parent = btn
-    
-    return btn, stroke
-end
-
-local FBtn1, FStr1 = createFarmButton("Set Position 1", Color3.fromRGB(255, 170, 0))
-local FBtn2, FStr2 = createFarmButton("Set Position 2", Color3.fromRGB(0, 170, 255))
-local FBtn3, FStr3 = createFarmButton("Set Position 3", Color3.fromRGB(255, 0, 255))
-local FBtn4, FStr4 = createFarmButton("Set Position 4 (Win)", Color3.fromRGB(0, 255, 255))
-
--- Control Buttons unter der Farm (Horizontal)
-local FarmControlsFrame = Instance.new("Frame")
-FarmControlsFrame.Size = UDim2.new(1, 0, 0, 40)
-FarmControlsFrame.BackgroundTransparency = 1
-FarmControlsFrame.Parent = Pages["Teleport"]
-
-local FCGrid = Instance.new("UIGridLayout")
-FCGrid.CellSize = UDim2.new(0, 185, 0, 38)
-FCGrid.CellPadding = UDim2.new(0, 15, 0, 0)
-FCGrid.Parent = FarmControlsFrame
-
-local StartFarmBtn, StartFarmStr = createFarmButton("START FARM", Color3.fromRGB(75, 255, 75))
-StartFarmStr.Color = Color3.fromRGB(75, 255, 75) StartFarmStr.Thickness = 1.5
-
-local ResetFarmBtn, ResetFarmStr = createFarmButton("RESET POSITIONS", Color3.fromRGB(255, 75, 75))
-ResetFarmStr.Color = Color3.fromRGB(255, 75, 75) ResetFarmStr.Thickness = 1.5
-
--- Server Hop am Ende einreihen
-local ServerHopButton = Instance.new("TextButton")
-ServerHopButton.Size = UDim2.new(0, 385, 0, 38)
-ServerHopButton.BackgroundColor3 = Color3.fromRGB(20, 35, 35)
-ServerHopButton.Font = Enum.Font.GothamBold
-ServerHopButton.Text = "Server Hop ↻"
-ServerHopButton.TextColor3 = Color3.fromRGB(0, 200, 200)
-ServerHopButton.TextSize = 12
-ServerHopButton.Parent = Pages["Teleport"]
-local SHCorner = Instance.new("UICorner") SHCorner.CornerRadius = UDim.new(0, 6) SHCorner.Parent = ServerHopButton
-local SHStroke = Instance.new("UIStroke") SHStroke.Color = Color3.fromRGB(0, 120, 120) SHStroke.Parent = ServerHopButton
-
--- ==========================================
--- AUTOMATION LOGIK FÜR DIE GODFARM
--- ==========================================
-local function aktualisiereFarmUI()
-    if punkte[1] then FBtn1.Text = "Position 1: Safe" FBtn1.TextColor3 = Color3.fromRGB(100, 255, 100) FStr1.Color = Color3.fromRGB(100, 255, 100) end
-    if punkte[2] then FBtn2.Text = "Position 2: Safe" FBtn2.TextColor3 = Color3.fromRGB(100, 255, 100) FStr2.Color = Color3.fromRGB(100, 255, 100) end
-    if punkte[3] then FBtn3.Text = "Position 3: Safe" FBtn3.TextColor3 = Color3.fromRGB(100, 255, 100) FStr3.Color = Color3.fromRGB(100, 255, 100) end
-    if punkte[4] then FBtn4.Text = "Position 4: Safe" FBtn4.TextColor3 = Color3.fromRGB(100, 255, 100) FStr4.Color = Color3.fromRGB(100, 255, 100) end
-end
-
-local function setzeFarmPunkt(index, button, stroke, baseText, color)
-    if rootPart then
-        punkte[index] = rootPart.Position
-        button.Text = baseText .. ": Safe"
-        button.TextColor3 = Color3.fromRGB(100, 255, 100)
-        stroke.Color = Color3.fromRGB(100, 255, 100)
-        speichereFarmPunkte()
-    end
-end
-
-FBtn1.MouseButton1Click:Connect(function() setzeFarmPunkt(1, FBtn1, FStr1, "Position 1") end)
-FBtn2.MouseButton1Click:Connect(function() setzeFarmPunkt(2, FBtn2, FStr2, "Position 2") end)
-FBtn3.MouseButton1Click:Connect(function() setzeFarmPunkt(3, FBtn3, FStr3, "Position 3") end)
-FBtn4.MouseButton1Click:Connect(function() setzeFarmPunkt(4, FBtn4, FStr4, "Position 4") end)
-
-ResetFarmBtn.MouseButton1Click:Connect(function()
-    punkte = {nil, nil, nil, nil}
-    table.clear(gueltigePunkte)
-    if delfile and isfile(FARM_DATEI_NAME) then delfile(FARM_DATEI_NAME) end
-    
-    FBtn1.Text = "Set Position 1" FBtn1.TextColor3 = Color3.fromRGB(255, 170, 0) FStr1.Color = Color3.fromRGB(45, 45, 50)
-    FBtn2.Text = "Set Position 2" FBtn2.TextColor3 = Color3.fromRGB(0, 170, 255) FStr2.Color = Color3.fromRGB(45, 45, 50)
-    FBtn3.Text = "Set Position 3" FBtn3.TextColor3 = Color3.fromRGB(255, 0, 255) FStr3.Color = Color3.fromRGB(45, 45, 50)
-    FBtn4.Text = "Set Position 4 (Win)" FBtn4.TextColor3 = Color3.fromRGB(0, 255, 255) FStr4.Color = Color3.fromRGB(45, 45, 50)
-    
-    if settings.farmActive then
-        settings.farmActive = false
-        StartFarmBtn.Text = "START FARM" StartFarmBtn.TextColor3 = Color3.fromRGB(75, 255, 75) StartFarmStr.Color = Color3.fromRGB(75, 255, 75)
-    end
-end)
-
-local function triggerFarmStart()
-    table.clear(gueltigePunkte)
-    for i = 1, 4 do if punkte[i] then table.insert(gueltigePunkte, punkte[i]) end end
-    
-    if #gueltigePunkte == 0 then
-        StartFarmBtn.Text = "Set at least 1 point!"
-        task.wait(1.5)
-        StartFarmBtn.Text = settings.farmActive and "STOP FARM" or "START FARM"
-        return
-    end
-    
-    settings.farmActive = not settings.farmActive
-    
-    if settings.farmActive then
-        StartFarmBtn.Text = "STOP FARM" StartFarmBtn.TextColor3 = Color3.fromRGB(255, 75, 75) StartFarmStr.Color = Color3.fromRGB(255, 75, 75)
-        farmAktuellerIndex = 1
-        wartetAufTeleport = false
-        if rootPart then letztePosition = rootPart.Position end
-        stillstandZeit = 0
-        letzteWins = holeAktuelleWins()
-        rundenOhneWin = 0
-    else
-        StartFarmBtn.Text = "START FARM" StartFarmBtn.TextColor3 = Color3.fromRGB(75, 255, 75) StartFarmStr.Color = Color3.fromRGB(75, 255, 75)
-        if humanoid then humanoid:Move(Vector3.new(0,0,0)) end
-    end
-end
-StartFarmBtn.MouseButton1Click:Connect(triggerFarmStart)
-
--- ==========================================
 -- SEPARATE SPEED OPTIONS UI
 -- ==========================================
 local SpeedUiFrame = Instance.new("Frame")
 SpeedUiFrame.Name = "SpeedUiFrame"
 SpeedUiFrame.Size = UDim2.new(0, 220, 0, 130)
 SpeedUiFrame.Position = UDim2.new(0.5, -230, 0.25, 0)
-SpeedUiFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+SpeedUiFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+SpeedUiFrame.BackgroundTransparency = 0.95
+SpeedUiFrame.Active = true
+SpeedUiFrame.Draggable = true
 SpeedUiFrame.Visible = false
 SpeedUiFrame.Parent = ScreenGui
 
 local SFCorner = Instance.new("UICorner") SFCorner.CornerRadius = UDim.new(0, 10) SFCorner.Parent = SpeedUiFrame
-local SFStroke = Instance.new("UIStroke") SFStroke.Color = Color3.fromRGB(45, 45, 50) SFStroke.Parent = SpeedUiFrame
+local SFStroke = Instance.new("UIStroke") SFStroke.Color = Color3.fromRGB(60, 60, 65) SFStroke.Parent = SpeedUiFrame
 
 local SFTitle = Instance.new("TextLabel")
 SFTitle.Size = UDim2.new(1, 0, 0, 30)
@@ -690,7 +400,7 @@ local SpeedInput = Instance.new("TextBox")
 local SpeedInputCorner = Instance.new("UICorner")
 SpeedInput.Size = UDim2.new(0, 180, 0, 30)
 SpeedInput.Position = UDim2.new(0, 20, 0, 40)
-SpeedInput.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+SpeedInput.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
 SpeedInput.Font = Enum.Font.Gotham
 SpeedInput.PlaceholderText = "Enter speed..."
 SpeedInput.Text = "16"
@@ -704,7 +414,7 @@ local ApplySpeedButton = Instance.new("TextButton")
 local ApplySpeedCorner = Instance.new("UICorner")
 ApplySpeedButton.Size = UDim2.new(0, 85, 0, 32)
 ApplySpeedButton.Position = UDim2.new(0, 20, 0, 80)
-ApplySpeedButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+ApplySpeedButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50) -- Rot
 ApplySpeedButton.Font = Enum.Font.GothamBold
 ApplySpeedButton.Text = "SET SPEED"
 ApplySpeedButton.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -717,7 +427,7 @@ local ResetSpeedButton = Instance.new("TextButton")
 local ResetSpeedCorner = Instance.new("UICorner")
 ResetSpeedButton.Size = UDim2.new(0, 85, 0, 32)
 ResetSpeedButton.Position = UDim2.new(0, 115, 0, 80)
-ResetSpeedButton.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+ResetSpeedButton.BackgroundColor3 = Color3.fromRGB(80, 80, 85)
 ResetSpeedButton.Font = Enum.Font.GothamBold
 ResetSpeedButton.Text = "RESET SPEED"
 ResetSpeedButton.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -727,99 +437,270 @@ ResetSpeedCorner.CornerRadius = UDim.new(0, 6)
 ResetSpeedCorner.Parent = ResetSpeedButton
 
 -- ==========================================
+-- CONTENT: TELEPORT TAB (God Farm Integration)
+-- ==========================================
+createToggle(teleportPage, "tpUiOpen", "TP Saver", 1, function(state)
+    local TPSaverFrame = ScreenGui:FindFirstChild("TPSaverFrame")
+    if TPSaverFrame then TPSaverFrame.Visible = state end
+end)
+
+local ServerHopButton = Instance.new("TextButton")
+local ServerHopCorner = Instance.new("UICorner")
+ServerHopButton.Size = UDim2.new(0, 165, 0, 40)
+ServerHopButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50) -- Rot
+ServerHopButton.Font = Enum.Font.GothamBold
+ServerHopButton.Text = "Server Hop ↻"
+ServerHopButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+ServerHopButton.TextSize = 12
+ServerHopButton.LayoutOrder = 2
+ServerHopButton.Parent = teleportPage
+ServerHopCorner.CornerRadius = UDim.new(0, 6)
+ServerHopCorner.Parent = ServerHopButton
+
+-- ==========================================
+-- GODLY FARM MENÜ (Integriert in Teleport Tab)
+-- ==========================================
+createToggle(teleportPage, "godFarmVisible", "God Farm", 3, function(state)
+    local GodFarmFrame = ScreenGui:FindFirstChild("GodFarmFrame")
+    if GodFarmFrame then GodFarmFrame.Visible = state end
+end)
+
+local GodFarmFrame = Instance.new("Frame")
+GodFarmFrame.Name = "GodFarmFrame"
+GodFarmFrame.Size = UDim2.new(0, 170, 0, 280)
+GodFarmFrame.Position = UDim2.new(0.5, 240, 0.25, 0)
+GodFarmFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+GodFarmFrame.Visible = false
+GodFarmFrame.Parent = ScreenGui
+
+local GodCorner = Instance.new("UICorner")
+GodCorner.CornerRadius = UDim.new(0, 10)
+GodCorner.Parent = GodFarmFrame
+
+local function erstelleFarmButton(text, yOffset, farbe)
+    local btn = Instance.new("TextButton")
+    btn.Parent = GodFarmFrame
+    btn.Size = UDim2.new(1, -20, 0, 32)
+    btn.Position = UDim2.new(0, 10, 0, yOffset)
+    btn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    btn.Text = text
+    btn.TextColor3 = farbe
+    btn.TextSize = 14
+    btn.Font = Enum.Font.SourceSansBold
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = btn
+    
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = farbe
+    stroke.Thickness = 1.5
+    stroke.Parent = btn
+    
+    return btn, stroke
+end
+
+local Btn1, Stroke1 = erstelleFarmButton("Punkt 1 setzen", 15, Color3.fromRGB(255, 170, 0))
+local Btn2, Stroke2 = erstelleFarmButton("Punkt 2 setzen", 55, Color3.fromRGB(0, 170, 255))
+local Btn3, Stroke3 = erstelleFarmButton("Punkt 3 setzen", 95, Color3.fromRGB(255, 0, 255))
+local Btn4, Stroke4 = erstelleFarmButton("Punkt 4 (Win) setzen", 135, Color3.fromRGB(0, 255, 255))
+local BtnStart, StrokeStart = erstelleFarmButton("START", 190, Color3.fromRGB(75, 255, 75))
+local BtnReset, StrokeReset = erstelleFarmButton("RESET PUNKTE", 235, Color3.fromRGB(255, 75, 75))
+
+-- ==========================================
+-- FARM LOGIK & PUNKTE-SYSTEM
+-- ==========================================
+local function aktualisiereButtonDesign(index, button, stroke, name)
+    if punkte[index] then
+        button.Text = name .. ": Safe"
+        button.TextColor3 = Color3.fromRGB(150, 255, 150)
+        stroke.Color = Color3.fromRGB(150, 255, 150)
+    end
+end
+
+local function aktualisiereAlles()
+    aktualisiereButtonDesign(1, Btn1, Stroke1, "Punkt 1")
+    aktualisiereButtonDesign(2, Btn2, Stroke2, "Punkt 2")
+    aktualisiereButtonDesign(3, Btn3, Stroke3, "Punkt 3")
+    aktualisiereButtonDesign(4, Btn4, Stroke4, "Punkt 4")
+end
+
+local function speicherePunkteInDatei()
+    local daten = {}
+    for i = 1, 4 do
+        if punkte[i] then daten[tostring(i)] = {punkte[i].X, punkte[i].Y, punkte[i].Z} end
+    end
+    local erfolg, json = pcall(function() return HttpService:JSONEncode(daten) end)
+    if erfolg then writefile(DATEI_NAME, json) end
+end
+
+local function ladePunkteAusDatei()
+    if isfile(DATEI_NAME) then
+        local inhalt = readfile(DATEI_NAME)
+        local erfolg, daten = pcall(function() return HttpService:JSONDecode(inhalt) end)
+        if erfolg and type(daten) == "table" then
+            for i = 1, 4 do
+                if daten[tostring(i)] then
+                    local p = daten[tostring(i)]
+                    punkte[i] = Vector3.new(p[1], p[2], p[3])
+                end
+            end
+            return true
+        end
+    end
+    return false
+end
+
+local function setzePunkt(index, button, stroke, name)
+    if rootPart then
+        punkte[index] = rootPart.Position
+        aktualisiereButtonDesign(index, button, stroke, name)
+        speicherePunkteInDatei()
+    end
+end
+
+Btn1.MouseButton1Click:Connect(function() setzePunkt(1, Btn1, Stroke1, "Punkt 1") end)
+Btn2.MouseButton1Click:Connect(function() setzePunkt(2, Btn2, Stroke2, "Punkt 2") end)
+Btn3.MouseButton1Click:Connect(function() setzePunkt(3, Btn3, Stroke3, "Punkt 3") end)
+Btn4.MouseButton1Click:Connect(function() setzePunkt(4, Btn4, Stroke4, "Punkt 4") end)
+
+BtnReset.MouseButton1Click:Connect(function()
+    punkte = {nil, nil, nil, nil}
+    table.clear(gueltigePunkte)
+    if isfile(DATEI_NAME) then delfile(DATEI_NAME) end
+    
+    Btn1.Text = "Punkt 1 setzen"; Btn1.TextColor3 = Color3.fromRGB(255, 170, 0); Stroke1.Color = Color3.fromRGB(255, 170, 0)
+    Btn2.Text = "Punkt 2 setzen"; Btn2.TextColor3 = Color3.fromRGB(0, 170, 255); Stroke2.Color = Color3.fromRGB(0, 170, 255)
+    Btn3.Text = "Punkt 3 setzen"; Btn3.TextColor3 = Color3.fromRGB(255, 0, 255); Stroke3.Color = Color3.fromRGB(255, 0, 255)
+    Btn4.Text = "Punkt 4 (Win) setzen"; Btn4.TextColor3 = Color3.fromRGB(0, 255, 255); Stroke4.Color = Color3.fromRGB(0, 255, 255)
+    
+    if laeuft then
+        laeuft = false
+        BtnStart.Text = "START"; BtnStart.TextColor3 = Color3.fromRGB(75, 255, 75); StrokeStart.Color = Color3.fromRGB(75, 255, 75)
+    end
+end)
+
+local function triggerStart()
+    table.clear(gueltigePunkte)
+    for i = 1, 4 do if punkte[i] then table.insert(gueltigePunkte, punkte[i]) end end
+    
+    if #gueltigePunkte == 0 then
+        BtnStart.Text = "Mind. 1 Punkt setzen!"
+        task.wait(1.5)
+        BtnStart.Text = laeuft and "STOPP" or "START"
+        return
+    end
+    
+    laeuft = not laeuft
+    
+    if laeuft then
+        BtnStart.Text = "STOPP"; BtnStart.TextColor3 = Color3.fromRGB(255, 75, 75); StrokeStart.Color = Color3.fromRGB(255, 75, 75)
+        gueltigePunkte = {}
+        for i = 1, 4 do if punkte[i] then table.insert(gueltigePunkte, punkte[i]) end end
+        aktuellerIndex = 1
+        wartetAufTeleport = false
+        if rootPart then letztePosition = rootPart.Position end
+        standstillTime = 0
+        letzteWins = holeAktuelleWins()
+        rundenOhneWin = 0
+    else
+        BtnStart.Text = "START"; BtnStart.TextColor3 = Color3.fromRGB(75, 255, 75); StrokeStart.Color = Color3.fromRGB(75, 255, 75)
+        if humanoid then humanoid:Move(Vector3.new(0,0,0)) end
+    end
+end
+
+BtnStart.MouseButton1Click:Connect(triggerStart)
+
+-- ==========================================
 -- INTEGRIERTES PLAYER TP MENÜ (TP Player)
 -- ==========================================
 local PlayerTPWindow = Instance.new("Frame")
 PlayerTPWindow.Name = "PlayerTPWindow"
 PlayerTPWindow.Size = UDim2.new(0, 250, 0, 300)
 PlayerTPWindow.Position = UDim2.new(0.5, 240, 0.25, 0)
-PlayerTPWindow.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+PlayerTPWindow.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+PlayerTPWindow.BorderSizePixel = 0
+PlayerTPWindow.Active = true
+PlayerTPWindow.Draggable = true
 PlayerTPWindow.Visible = false
 PlayerTPWindow.Parent = ScreenGui
 
 local PTPCorner = Instance.new("UICorner") PTPCorner.CornerRadius = UDim.new(0, 10) PTPCorner.Parent = PlayerTPWindow
-local PTPStroke = Instance.new("UIStroke") PTPStroke.Color = Color3.fromRGB(45, 45, 50) PTPStroke.Parent = PlayerTPWindow
+local PTPStroke = Instance.new("UIStroke") PTPStroke.Color = Color3.fromRGB(60, 60, 65) PTPStroke.Parent = PlayerTPWindow
 
 local PTPTitle = Instance.new("TextLabel")
-PTPTitle.Size = UDim2.new(1, 0, 0, 40)
-PTPTitle.BackgroundTransparency = 1
-PTPTitle.Text = "Spieler auswählen"
-PTPTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-PTPTitle.TextSize = 14
-PTPTitle.Font = Enum.Font.GothamBold
-PTPTitle.Parent = PlayerTPWindow
+PTPTitle.Size = UDim2.new(1, 0, 0, 40) PTPTitle.BackgroundTransparency = 1
+PTPTitle.Text = "Spieler auswählen" PTPTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+PTPTitle.TextSize = 16 PTPTitle.Font = Enum.Font.GothamBold PTPTitle.Parent = PlayerTPWindow
 
 local PTPCloseButton = Instance.new("TextButton")
-PTPCloseButton.Size = UDim2.new(0, 30, 0, 30)
-PTPCloseButton.Position = UDim2.new(1, -35, 0, 5)
-PTPCloseButton.BackgroundTransparency = 1
-PTPCloseButton.Text = "×"
-PTPCloseButton.TextColor3 = Color3.fromRGB(255, 50, 50)
-PTPCloseButton.TextSize = 22
-PTPCloseButton.Font = Enum.Font.GothamBold
-PTPCloseButton.Parent = PlayerTPWindow
+PTPCloseButton.Size = UDim2.new(0, 30, 0, 30) PTPCloseButton.Position = UDim2.new(1, -35, 0, 5)
+PTPCloseButton.BackgroundTransparency = 1 PTPCloseButton.Text = "X"
+PTPCloseButton.TextColor3 = Color3.fromRGB(200, 50, 50) PTPCloseButton.TextSize = 18
+PTPCloseButton.Font = Enum.Font.GothamBold PTPCloseButton.Parent = PlayerTPWindow
 
 local PTPScrollFrame = Instance.new("ScrollingFrame")
-PTPScrollFrame.Size = UDim2.new(1, -20, 1, -100)
-PTPScrollFrame.Position = UDim2.new(0, 10, 0, 45)
-PTPScrollFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
-PTPScrollFrame.BorderSizePixel = 0
-PTPScrollFrame.ScrollBarThickness = 4
-PTPScrollFrame.Parent = PlayerTPWindow
+PTPScrollFrame.Size = UDim2.new(1, -20, 1, -100) PTPScrollFrame.Position = UDim2.new(0, 10, 0, 45)
+PTPScrollFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25) PTPScrollFrame.BorderSizePixel = 0
+PTPScrollFrame.ScrollBarThickness = 6 PTPScrollFrame.Parent = PlayerTPWindow
 
-local PTPListLayout = Instance.new("UIListLayout") PTPListLayout.Parent = PTPScrollFrame PTPListLayout.Padding = UDim.new(0, 5)
+local PTPListLayout = Instance.new("UIListLayout") PTPListLayout.Parent = PTPScrollFrame PTPListLayout.SortOrder = Enum.SortOrder.LayoutOrder PTPListLayout.Padding = UDim.new(0, 5)
 
 local selectedPlayerName = nil
 
-function updatePlayerList()
-    for _, child in pairs(PTPScrollFrame:GetChildren()) do if child:IsA("TextButton") then child:Destroy() end end
+local function updatePlayerList()
+    for _, child in pairs(PTPScrollFrame:GetChildren()) do
+        if child:IsA("TextButton") then child:Destroy() end
+    end
+
     for _, p in pairs(Players:GetPlayers()) do
         if p ~= player then
             local pButton = Instance.new("TextButton")
-            pButton.Size = UDim2.new(1, -5, 0, 30)
-            pButton.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
-            pButton.Text = p.Name
-            pButton.TextColor3 = Color3.fromRGB(200, 200, 200)
-            pButton.Font = Enum.Font.Gotham
-            pButton.TextSize = 13
-            pButton.Parent = PTPScrollFrame
-            Instance.new("UICorner", pButton).CornerRadius = UDim.new(0, 4)
+            pButton.Size = UDim2.new(1, -5, 0, 30) pButton.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+            pButton.Text = p.Name pButton.TextColor3 = Color3.fromRGB(200, 200, 200)
+            pButton.TextSize = 14 pButton.Font = Enum.Font.Gotham pButton.Parent = PTPScrollFrame
+
+            local pCorner = Instance.new("UICorner") pCorner.CornerRadius = UDim.new(0, 4) pCorner.Parent = pButton
 
             pButton.MouseButton1Click:Connect(function()
                 selectedPlayerName = p.Name
                 for _, btn in pairs(PTPScrollFrame:GetChildren()) do
-                    if btn:IsA("TextButton") then btn.BackgroundColor3 = Color3.fromRGB(30, 30, 35) end
+                    if btn:IsA("TextButton") then btn.BackgroundColor3 = Color3.fromRGB(40, 40, 45) end
                 end
-                pButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+                pButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50) -- Rot
             end)
         end
     end
 end
 
 local PTPExecuteButton = Instance.new("TextButton")
-PTPExecuteButton.Size = UDim2.new(1, -20, 0, 38)
-PTPExecuteButton.Position = UDim2.new(0, 10, 1, -48)
-PTPExecuteButton.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
-PTPExecuteButton.Text = "Zu Spieler teleportieren"
-PTPExecuteButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-PTPExecuteButton.Font = Enum.Font.GothamBold
-PTPExecuteButton.TextSize = 13
-PTPExecuteButton.Parent = PlayerTPWindow
-Instance.new("UICorner", PTPExecuteButton).CornerRadius = UDim.new(0, 6)
+PTPExecuteButton.Size = UDim2.new(1, -20, 0, 40) PTPExecuteButton.Position = UDim2.new(0, 10, 1, -50)
+PTPExecuteButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50) -- Rot
+PTPExecuteButton.Text = "Zu Spieler teleportieren" PTPExecuteButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+PTPExecuteButton.TextSize = 14 PTPExecuteButton.Font = Enum.Font.GothamBold PTPExecuteButton.Parent = PlayerTPWindow
+
+local PTPExecuteCorner = Instance.new("UICorner") PTPExecuteCorner.CornerRadius = UDim.new(0, 6) PTPExecuteCorner.Parent = PTPExecuteButton
+
+createToggle(teleportPage, "tpPlayerUiOpen", "TP Player", 3, function(state)
+    PlayerTPWindow.Visible = state
+    if state then updatePlayerList() else selectedPlayerName = nil end
+end)
 
 PTPCloseButton.MouseButton1Click:Connect(function()
     settings.tpPlayerUiOpen = false
     local toggleData = activeToggles["tpPlayerUiOpen"]
     if toggleData then updateToggleVisual(toggleData.Switch, toggleData.Ball, false) end
-    PlayerTPWindow.Visible = false
-    saveSettings()
+    PlayerTPWindow.Visible = false selectedPlayerName = nil saveSettings()
 end)
 
 PTPExecuteButton.MouseButton1Click:Connect(function()
     if selectedPlayerName then
         local targetPlayer = Players:FindFirstChild(selectedPlayerName)
-        if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") and rootPart then
-            rootPart.CFrame = targetPlayer.Character.HumanoidRootPart.CFrame
+        if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            local character = player.Character
+            if character and character:FindFirstChild("HumanoidRootPart") then
+                character.HumanoidRootPart.CFrame = targetPlayer.Character.HumanoidRootPart.CFrame
+            end
         end
     end
 end)
@@ -828,77 +709,49 @@ Players.PlayerAdded:Connect(updatePlayerList)
 Players.PlayerRemoving:Connect(updatePlayerList)
 
 -- ==========================================
--- THE SEPARATE TP SAVER WINDOW (TP Saver)
+-- ROBUSTES UNIVERSAL PLAYER ESP (ROT)
 -- ==========================================
-local TPSaverFrame = Instance.new("Frame")
-TPSaverFrame.Name = "TPSaverFrame"
-TPSaverFrame.Size = UDim2.new(0, 220, 0, 240)
-TPSaverFrame.Position = UDim2.new(0.5, -230, 0.25, 0) 
-TPSaverFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-TPSaverFrame.Visible = false
-TPSaverFrame.Parent = ScreenGui
+local function applyHighlightToCharacter(char)
+    if char.PrimaryPart and not char:FindFirstChild("NotixEspObject") then
+        local highlight = Instance.new("Highlight")
+        highlight.Name = "NotixEspObject"
+        highlight.Adornee = char
+        highlight.FillColor = Color3.fromRGB(200, 50, 50) -- Rot
+        highlight.FillTransparency = 0.4
+        highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+        highlight.OutlineTransparency = 0.2
+        highlight.Enabled = settings.playerEspActive
+        highlight.Parent = char
+        espHighlights[char] = highlight
+    end
+end
 
-local TPFrameCorner = Instance.new("UICorner") local TPFrameStroke = Instance.new("UIStroke")
-TPFrameCorner.CornerRadius = UDim.new(0, 12) TPFrameCorner.Parent = TPSaverFrame
-TPFrameStroke.Color = Color3.fromRGB(45, 45, 50) TPFrameStroke.Parent = TPSaverFrame
+local function monitorPlayer(p)
+    p.CharacterAdded:Connect(function(char)
+        char:WaitForChild("HumanoidRootPart", 5)
+        applyHighlightToCharacter(char)
+    end)
+    if p.Character then
+        task.spawn(function()
+            p.Character:WaitForChild("HumanoidRootPart", 5)
+            applyHighlightToCharacter(p.Character)
+        end)
+    end
+end
 
-local TPTitle = Instance.new("TextLabel")
-TPTitle.Size = UDim2.new(1, 0, 0, 35)
-TPTitle.BackgroundTransparency = 1
-TPTitle.Text = "Notix TP Saver"
-TPTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-TPTitle.TextSize = 13
-TPTitle.Font = Enum.Font.GothamBold
-TPTitle.Parent = TPSaverFrame
+for _, p in pairs(Players:GetPlayers()) do monitorPlayer(p) end
+Players.PlayerAdded:Connect(monitorPlayer)
 
-local TPContent = Instance.new("Frame")
-TPContent.Size = UDim2.new(1, 0, 1, -35)
-TPContent.Position = UDim2.new(0, 0, 0, 35)
-TPContent.BackgroundTransparency = 1
-TPContent.Parent = TPSaverFrame
-
-local TPList = Instance.new("UIListLayout") TPList.Parent = TPContent; TPList.HorizontalAlignment = Enum.HorizontalAlignment.Center; TPList.Padding = UDim.new(0, 8)
-
-local TabContainer = Instance.new("Frame") TabContainer.Size = UDim2.new(0, 180, 0, 30) TabContainer.BackgroundTransparency = 1 TabContainer.Parent = TPContent
-local Tab1Button = Instance.new("TextButton") Tab1Button.Size = UDim2.new(0, 85, 1, 0) Tab1Button.BackgroundColor3 = Color3.fromRGB(200, 50, 50) Tab1Button.Text = "Point 1" Tab1Button.TextColor3 = Color3.fromRGB(255, 255, 255) Tab1Button.Font = Enum.Font.GothamBold Tab1Button.Parent = TabContainer; Instance.new("UICorner", Tab1Button).CornerRadius = UDim.new(0,6)
-local Tab2Button = Instance.new("TextButton") Tab2Button.Size = UDim2.new(0, 85, 1, 0) Tab2Button.Position = UDim2.new(1, -85, 0, 0) Tab2Button.BackgroundColor3 = Color3.fromRGB(40, 40, 45) Tab2Button.Text = "Point 2" Tab2Button.TextColor3 = Color3.fromRGB(180, 180, 180) Tab2Button.Font = Enum.Font.GothamBold Tab2Button.Parent = TabContainer; Instance.new("UICorner", Tab2Button).CornerRadius = UDim.new(0,6)
-
-local TPButton = Instance.new("TextButton") TPButton.Size = UDim2.new(0, 180, 0, 35) TPButton.BackgroundColor3 = Color3.fromRGB(35, 35, 40) TPButton.Text = "TP" TPButton.TextColor3 = Color3.fromRGB(255, 255, 255) TPButton.Font = Enum.Font.GothamBold TPButton.Parent = TPContent; Instance.new("UICorner", TPButton).CornerRadius = UDim.new(0,6)
-local SetPosButton = Instance.new("TextButton") SetPosButton.Size = UDim2.new(0, 180, 0, 35) SetPosButton.BackgroundColor3 = Color3.fromRGB(46, 204, 113) SetPosButton.Text = "Set Position" SetPosButton.TextColor3 = Color3.fromRGB(255, 255, 255) SetPosButton.Font = Enum.Font.GothamBold SetPosButton.Parent = TPContent; Instance.new("UICorner", SetPosButton).CornerRadius = UDim.new(0,6)
-local AutoTPButton = Instance.new("TextButton") AutoTPButton.Size = UDim2.new(0, 180, 0, 35) AutoTPButton.BackgroundColor3 = Color3.fromRGB(50, 50, 55) AutoTPButton.Text = "Auto-TP: OFF" AutoTPButton.TextColor3 = Color3.fromRGB(200, 200, 200) AutoTPButton.Font = Enum.Font.GothamBold AutoTPButton.Parent = TPContent; Instance.new("UICorner", AutoTPButton).CornerRadius = UDim.new(0,6)
-
-local savedPositions = {["Point 1"] = nil, ["Point 2"] = nil}
-local currentSelectedSlot = "Point 1"
-local autoTpActive = false
-local autoTpConnection = nil
-
-Tab1Button.MouseButton1Click:Connect(function() currentSelectedSlot = "Point 1" Tab1Button.BackgroundColor3 = Color3.fromRGB(200, 50, 50) Tab2Button.BackgroundColor3 = Color3.fromRGB(40, 40, 45) end)
-Tab2Button.MouseButton1Click:Connect(function() currentSelectedSlot = "Point 2" Tab2Button.BackgroundColor3 = Color3.fromRGB(200, 50, 50) Tab1Button.BackgroundColor3 = Color3.fromRGB(40, 40, 45) end)
-SetPosButton.MouseButton1Click:Connect(function() if rootPart then savedPositions[currentSelectedSlot] = rootPart.CFrame SetPosButton.Text = "Saved! ✓" task.wait(0.8) SetPosButton.Text = "Set Position" end end)
-TPButton.MouseButton1Click:Connect(function() if rootPart and savedPositions[currentSelectedSlot] then rootPart.CFrame = savedPositions[currentSelectedSlot] end end)
-AutoTPButton.MouseButton1Click:Connect(function()
-    if not savedPositions[currentSelectedSlot] then return end 
-    autoTpActive = not autoTpActive 
-    AutoTPButton.Text = autoTpActive and "Auto-TP: ON" or "Auto-TP: OFF" 
-    AutoTPButton.BackgroundColor3 = autoTpActive and Color3.fromRGB(200, 50, 50) or Color3.fromRGB(50, 50, 55) 
-    if autoTpActive then 
-        autoTpConnection = RunService.Heartbeat:Connect(function() 
-            if autoTpActive and savedPositions[currentSelectedSlot] and rootPart then rootPart.CFrame = savedPositions[currentSelectedSlot] end 
-        end) 
-    else 
-        if autoTpConnection then autoTpConnection:Disconnect() end 
-    end 
-end)
-
--- Permanent X-Ray Listener
-workspace.DescendantAdded:Connect(function(obj)
-    if settings.xrayActive and obj:IsA("BasePart") then
-        if character and obj:IsDescendantOf(character) then return end
-        if obj:IsA("Terrain") then return end
-        task.wait()
-        if obj and obj.Parent and not originalTransparencies[obj] then
-            originalTransparencies[obj] = obj.Transparency
-            obj.Transparency = 0.7
+RunService.Heartbeat:Connect(function()
+    -- Universelles ESP checken
+    for _, p in pairs(Players:GetPlayers()) do
+        if p.Character and p ~= player then
+            local hl = p.Character:FindFirstChild("NotixEspObject")
+            if hl then
+                hl.Enabled = settings.playerEspActive
+            else
+                applyHighlightToCharacter(p.Character)
+            end
         end
     end
 end)
@@ -907,17 +760,93 @@ end)
 -- CONTENT: CREDITS TAB
 -- ==========================================
 local CreditsLabel = Instance.new("TextLabel")
-CreditsLabel.Size = UDim2.new(1, -20, 0, 120)
-CreditsLabel.Position = UDim2.new(0, 10, 0, 10)
-CreditsLabel.BackgroundTransparency = 1
-CreditsLabel.Font = Enum.Font.Gotham
-CreditsLabel.Text = "Notix Hub v3.5\nCreated by Notix\n\nUniversal Edition with High Performance GodFarm Engine Active!"
-CreditsLabel.TextColor3 = Color3.fromRGB(180, 180, 185)
-CreditsLabel.TextSize = 13
+CreditsLabel.Size = UDim2.new(0, 300, 0, 100) CreditsLabel.BackgroundTransparency = 1
+CreditsLabel.Font = Enum.Font.Gotham CreditsLabel.Text = "Notix Hub v3.4\nCreated by Notix\n\nUniversal + Godly Farm Red Edition Active!"
+CreditsLabel.TextColor3 = Color3.fromRGB(180, 180, 185) CreditsLabel.TextSize = 13
 CreditsLabel.Parent = creditsPage
 
 -- ==========================================
--- CONFIG LOAD FUNCTION
+-- SEPARATE TP SAVER WINDOW (TP Saver)
+-- ==========================================
+local TPSaverFrame = Instance.new("Frame")
+TPSaverFrame.Name = "TPSaverFrame"
+TPSaverFrame.Size = UDim2.new(0, 220, 0, 240)
+TPSaverFrame.Position = UDim2.new(0.5, -230, 0.25, 0) 
+TPSaverFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 28)
+TPSaverFrame.Active = true TPSaverFrame.Draggable = true TPSaverFrame.Visible = false TPSaverFrame.Parent = ScreenGui
+
+local TPFrameCorner = Instance.new("UICorner") local TPFrameStroke = Instance.new("UIStroke")
+TPFrameCorner.CornerRadius = UDim.new(0, 12) TPFrameCorner.Parent = TPSaverFrame
+TPFrameStroke.Color = Color3.fromRGB(60, 60, 65) TPFrameStroke.Parent = TPSaverFrame
+
+local TPTitle = Instance.new("TextLabel")
+TPTitle.Size = UDim2.new(1, 0, 0, 35) TPTitle.BackgroundTransparency = 1
+TPTitle.Text = "Notix TP Saver" TPTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+TPTitle.TextSize = 14 TPTitle.Font = Enum.Font.GothamBold TPTitle.Parent = TPSaverFrame
+
+local TPContent = Instance.new("Frame")
+TPContent.Size = UDim2.new(1, 0, 1, -35) TPContent.Position = UDim2.new(0, 0, 0, 35)
+TPContent.BackgroundTransparency = 1 TPContent.Parent = TPSaverFrame
+
+local TPList = Instance.new("UIListLayout") TPList.Parent = TPContent TPList.HorizontalAlignment = Enum.HorizontalAlignment.Center TPList.Padding = UDim.new(0, 8)
+
+local TabContainer = Instance.new("Frame") TabContainer.Size = UDim2.new(0, 180, 0, 30) TabContainer.BackgroundTransparency = 1 TabContainer.Parent = TPContent
+
+local Tab1Button = Instance.new("TextButton")
+Tab1Button.Size = UDim2.new(0, 85, 1, 0) Tab1Button.BackgroundColor3 = Color3.fromRGB(200, 50, 50) -- Rot
+Tab1Button.Text = "Point 1" Tab1Button.TextColor3 = Color3.fromRGB(255, 255, 255) Tab1Button.Font = Enum.Font.GothamBold Tab1Button.Parent = TabContainer
+local T1C = Instance.new("UICorner") T1C.CornerRadius = UDim.new(0,6) T1C.Parent = Tab1Button
+
+local Tab2Button = Instance.new("TextButton")
+Tab2Button.Size = UDim2.new(0, 85, 1, 0) Tab2Button.Position = UDim2.new(1, -85, 0, 0)
+Tab2Button.BackgroundColor3 = Color3.fromRGB(45, 45, 50) Tab2Button.Text = "Point 2"
+Tab2Button.TextColor3 = Color3.fromRGB(180, 180, 180) Tab2Button.Font = Enum.Font.GothamBold Tab2Button.Parent = TabContainer
+local T2C = Instance.new("UICorner") T2C.CornerRadius = UDim.new(0,6) T2C.Parent = Tab2Button
+
+local TPButton = Instance.new("TextButton")
+TPButton.Size = UDim2.new(0, 180, 0, 35) TPButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50) -- Rot
+TPButton.Text = "TP" TPButton.TextColor3 = Color3.fromRGB(255, 255, 255) TPButton.Font = Enum.Font.GothamBold TPButton.Parent = TPContent
+local TPC = Instance.new("UICorner") TPC.CornerRadius = UDim.new(0,8) TPC.Parent = TPButton
+
+local SetPosButton = Instance.new("TextButton")
+SetPosButton.Size = UDim2.new(0, 180, 0, 35) SetPosButton.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
+SetPosButton.Text = "Set Position" SetPosButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+SetPosButton.Font = Enum.Font.GothamBold SetPosButton.Parent = TPContent
+local SPC = Instance.new("UICorner") SPC.CornerRadius = UDim.new(0,8) SPC.Parent = SetPosButton
+
+local AutoTPButton = Instance.new("TextButton") local AutoCorner = Instance.new("UICorner")
+AutoTPButton.Size = UDim2.new(0, 180, 0, 35) AutoTPButton.BackgroundColor3 = Color3.fromRGB(60, 60, 65)
+AutoTPButton.Text = "Auto-TP: OFF" AutoTPButton.TextColor3 = Color3.fromRGB(200, 200, 200)
+AutoTPButton.Font = Enum.Font.GothamBold AutoTPButton.Parent = TPContent
+AutoCorner.CornerRadius = UDim.new(0, 8) AutoCorner.Parent = AutoTPButton
+
+-- ==========================================
+-- FUNKTION: HIER WERDEN DIE WINS AUSGELESEN
+-- ==========================================
+local function holeAktuelleWins()
+    local leaderstats = player:FindFirstChild("leaderstats")
+    if leaderstats then
+        for _, v in pairs(leaderstats:GetChildren()) do
+            if string.find(string.lower(v.Name), "win") then return v.Value end
+        end
+    end
+    return 0
+end
+
+-- ==========================================
+-- FUNKTION: REJOIN SERVER
+-- ==========================================
+local function serverRejoin()
+    print("Anti-Cheat blockiert Wins! Rejoin auf denselben Server läuft...")
+    if game.JobId ~= "" then
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, player)
+    else
+        TeleportService:Teleport(game.PlaceId, player)
+    end
+end
+
+-- ==========================================
+-- LOAD CONFIG FUNCTION
 -- ==========================================
 local function loadSettings()
     if isfile and isfile(fileName) then
@@ -930,10 +859,9 @@ local function loadSettings()
     
     SpeedInput.Text = tostring(settings.currentSpeed)
     for key, toggleData in pairs(activeToggles) do
-        if settings[key] ~= nil then
-            updateToggleVisual(toggleData.Switch, toggleData.Ball, settings[key])
-            if settings[key] == true then task.spawn(function() toggleData.Callback(true) end) end
-        end
+        local toggleVis = updateToggleVisual
+        if toggleVis then toggleVis(toggleData.Switch, toggleData.Ball, settings[key]) end
+        if settings[key] == true then toggleData.Callback(true) end
     end
 end
 
@@ -949,17 +877,19 @@ NHButton.MouseButton1Click:Connect(function()
         SpeedUiFrame.Visible = settings.speedSystemActive
         TPSaverFrame.Visible = settings.tpUiOpen
         PlayerTPWindow.Visible = settings.tpPlayerUiOpen
+        GodFarmFrame.Visible = settings.godFarmVisible
     else
         if settings.speedSystemActive then SpeedUiFrame.Visible = true end
         if settings.tpUiOpen then TPSaverFrame.Visible = true end
         if settings.tpPlayerUiOpen then PlayerTPWindow.Visible = true end
+        if settings.godFarmVisible then GodFarmFrame.Visible = true end
     end
 end)
 
--- Anti-Die Loop & NoClip State
+-- INTEGRATIVE ANTI-DIE & ROBLOX ANTI-AFK LOGIK
 task.spawn(function()
     while task.wait(0.1) do
-        if settings.farmActive and humanoid and humanoid.Health > 0 then
+        if laeuft and humanoid and humanoid.Health > 0 then
             if humanoid.Health < 30 then humanoid.Health = 100 end
             if humanoid:GetState() ~= Enum.HumanoidStateType.NoClip then
                 humanoid:ChangeState(Enum.HumanoidStateType.NoClip)
@@ -968,78 +898,87 @@ task.spawn(function()
     end
 end)
 
--- Roblox Anti-AFK
 player.Idled:Connect(function()
     local VirtualUser = game:GetService("VirtualUser")
     VirtualUser:CaptureController()
     VirtualUser:ClickButton2(Vector2.new(0,0))
 end)
 
--- Main Heartbeat Execution Loop (Speed, Noclip, GodFarm)
-RunService.Heartbeat:Connect(function()
-    if character and humanoid and rootPart then
-        -- Speed Check
-        if settings.speedSystemActive and humanoid.WalkSpeed ~= settings.currentSpeed then
-            humanoid.WalkSpeed = settings.currentSpeed
+player.CharacterAdded:Connect(function(char)
+    local hum = char:WaitForChild("Humanoid")
+    task.wait(0.2)
+    defaultSpeed = hum.WalkSpeed
+    if settings.speedSystemActive then hum.WalkSpeed = settings.currentSpeed end
+    if settings.unwalkActive then
+        local animator = hum:FindFirstChildOfClass("Animator")
+        if animator and animTrackConnection == nil then
+            animTrackConnection = animator.AnimationPlayed:Connect(function(track)
+                if settings.unwalkActive and (track.Name:lower():find("walk") or track.Name:lower():find("run")) then
+                    task.wait() track:Stop()
+                end
+            end)
         end
+    end
+end)
+
+-- HAUPTSCHLEIFE FÜR GAMEPLAY, ANTI-AFK & FARM
+task.spawn(function()
+    while true do
+        task.wait(0.02)
         
-        -- Noclip Check
-        if settings.noclipActive then
-            for _, part in pairs(character:GetDescendants()) do
-                if part:IsA("BasePart") then part.CanCollide = false end
-            end
-        end
-        
-        -- GodFarm Core Logic
-        if settings.farmActive and #gueltigePunkte > 0 and humanoid.Health > 0 then
+        if laeuft and humanoid and rootPart and humanoid.Health > 0 and #gueltigePunkte > 0 then
             local meinPos = rootPart.Position
             
-            -- Anti-Stuck Check
             local wegStrecke = (meinPos - letztePosition).Magnitude
             if wegStrecke < 0.5 then
-                stillstandZeit = stillstandZeit + 0.016
-                if stillstandZeit >= 3.0 then
+                standstillTime = standstillTime + 0.02
+                if standstillTime >= 3.0 then
                     humanoid.Jump = true
-                    stillstandZeit = 0
+                    standstillTime = 0
                 end
             else
                 letztePosition = meinPos
-                stillstandZeit = 0
+                standstillTime = 0
             end
             
-            -- Teleport Wartemodus (Drop + Win Tracker)
             if wartetAufTeleport then
-                if (meinPos - dropPosition).Magnitude > 35 then
+                local distanzSeitDrop = (meinPos - dropPosition).Magnitude
+                if distanzSeitDrop > 35 then
                     task.wait(0.5)
                     local aktuelleWins = holeAktuelleWins()
+                    
                     if aktuelleWins > letzteWins then
                         rundenOhneWin = 0
                         letzteWins = aktuelleWins
+                        print("Win registriert! Runden-Fehler resettet.")
                     else
                         rundenOhneWin = rundenOhneWin + 1
+                        print("Kein Win registriert! Fehlversuche: " .. rundenOhneWin .. "/" .. maximalFehlversuche)
                         if rundenOhneWin >= maximalFehlversuche then
                             serverRejoin()
                             return
                         end
                     end
                     wartetAufTeleport = false
-                    farmAktuellerIndex = 1
+                    aktuellerIndex = 1
                 else
                     rootPart.Velocity = Vector3.new(0, rootPart.Velocity.Y, 0)
                     humanoid:Move(Vector3.new(0,0,0))
                 end
             else
-                local ziel = gueltigePunkte[farmAktuellerIndex]
+                local ziel = gueltigePunkte[aktuellerIndex]
+                
                 if ziel then
                     local aktuellerSpeed = humanoid.WalkSpeed
                     local abstand = math.sqrt((meinPos.X - ziel.X)^2 + (meinPos.Z - ziel.Z)^2)
                     
                     if ziel.Y > (meinPos.Y + 2.5) then
                         rootPart.Velocity = Vector3.new(0, 110, 0)
-                        local rX, rZ = ziel.X - meinPos.X, ziel.Z - meinPos.Z
-                        local len = math.sqrt(rX^2 + rZ^2)
+                        local richtungX = ziel.X - meinPos.X
+                        local richtungZ = ziel.Z - meinPos.Z
+                        local len = math.sqrt(richtungX^2 + richtungZ^2)
                         if len > 0 then
-                            rootPart.Velocity = Vector3.new((rX / len) * aktuellerSpeed, rootPart.Velocity.Y, (rZ / len) * aktuellerSpeed)
+                            rootPart.Velocity = Vector3.new((richtungX / len) * aktuellerSpeed, rootPart.Velocity.Y, (richtungZ / len) * aktuellerSpeed)
                         end
                     else
                         local richtung = (ziel - meinPos).Unit
@@ -1048,13 +987,13 @@ RunService.Heartbeat:Connect(function()
                     end
                     
                     if abstand < 4.5 and math.abs(meinPos.Y - ziel.Y) < 6 then
-                        if farmAktuellerIndex == #gueltigePunkte then
+                        if aktuellerIndex == #gueltigePunkte then
                             dropPosition = meinPos
                             rootPart.Velocity = Vector3.new(0, -40, 0)
                             letzteWins = holeAktuelleWins()
                             wartetAufTeleport = true
                         else
-                            farmAktuellerIndex = farmAktuellerIndex + 1
+                            aktuellerIndex = aktuellerIndex + 1
                         end
                     end
                 end
@@ -1063,21 +1002,38 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
+RunService.Heartbeat:Connect(function()
+    local character = player.Character
+    if character and character:FindFirstChildOfClass("Humanoid") then
+        local hum = character:FindFirstChildOfClass("Humanoid")
+        if settings.speedSystemActive and hum.WalkSpeed ~= settings.currentSpeed then
+            hum.WalkSpeed = settings.currentSpeed
+        end
+    end
+    if settings.noclipActive and character then
+        for _, part in pairs(character:GetDescendants()) do
+            if part:IsA("BasePart") then part.CanCollide = false end
+        end
+    end
+end)
+
 UIS.JumpRequest:Connect(function()
-	if settings.infiniteJumpEnabled and character and humanoid then
-		humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+	if settings.infiniteJumpEnabled and player.Character and player.Character:FindFirstChildOfClass("Humanoid") then
+		player.Character:FindFirstChildOfClass("Humanoid"):ChangeState(Enum.HumanoidStateType.Jumping)
 	end
 end)
 
--- UI Buttons Logic
+-- UI STEUERUNG - SPEED & TP
 ApplySpeedButton.MouseButton1Click:Connect(function()
     local targetSpeed = tonumber(SpeedInput.Text)
     if targetSpeed then
         if targetSpeed < 0 then targetSpeed = 0 end
         settings.currentSpeed = targetSpeed
         saveSettings()
-        if humanoid then humanoid.WalkSpeed = settings.currentSpeed end
-        ApplySpeedButton.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
+        if player.Character and player.Character:FindFirstChildOfClass("Humanoid") then
+            player.Character:FindFirstChildOfClass("Humanoid").WalkSpeed = settings.currentSpeed
+        end
+        ApplySpeedButton.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
         task.wait(0.15)
         ApplySpeedButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
     else
@@ -1089,10 +1045,12 @@ ResetSpeedButton.MouseButton1Click:Connect(function()
     settings.currentSpeed = defaultSpeed
     SpeedInput.Text = tostring(defaultSpeed)
     saveSettings()
-    if humanoid then humanoid.WalkSpeed = defaultSpeed end
+    if player.Character and player.Character:FindFirstChildOfClass("Humanoid") then
+        player.Character:FindFirstChildOfClass("Humanoid").WalkSpeed = defaultSpeed
+    end
     ResetSpeedButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
     task.wait(0.15)
-    ResetSpeedButton.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+    ResetSpeedButton.BackgroundColor3 = Color3.fromRGB(80, 80, 85)
 end)
 
 ServerHopButton.MouseButton1Click:Connect(function()
@@ -1113,12 +1071,28 @@ ServerHopButton.MouseButton1Click:Connect(function()
     if not x then ServerHopButton.Text = "Error!" task.wait(1) ServerHopButton.Text = "Server Hop ↻" end
 end)
 
--- Auto-Load Config & Points on Startup
-loadSettings()
-if ladeFarmPunkte() then
-    aktualisiereFarmUI()
+-- TPSaver Logik
+local savedPositions = {["Point 1"] = nil, ["Point 2"] = nil}
+local currentSelectedSlot = "Point 1"
+local autoTpActive = false
+local autoTpConnection = nil
+
+Tab1Button.MouseButton1Click:Connect(function() currentSelectedSlot = "Point 1" Tab1Button.BackgroundColor3 = Color3.fromRGB(200, 50, 50) Tab2Button.BackgroundColor3 = Color3.fromRGB(45, 45, 50) end)
+Tab2Button.MouseButton1Click:Connect(function() currentSelectedSlot = "Point 2" Tab2Button.BackgroundColor3 = Color3.fromRGB(200, 50, 50) Tab1Button.BackgroundColor3 = Color3.fromRGB(45, 45, 50) end)
+SetPosButton.MouseButton1Click:Connect(function() if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then savedPositions[currentSelectedSlot] = player.Character.HumanoidRootPart.CFrame SetPosButton.Text = "Saved! ✓" task.wait(0.8) SetPosButton.Text = "Set Position" end end)
+TPButton.MouseButton1Click:Connect(function() if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and savedPositions[currentSelectedSlot] then player.Character.HumanoidRootPart.CFrame = savedPositions[currentSelectedSlot] end end)
+AutoTPButton.MouseButton1Click:Connect(function() if not savedPositions[currentSelectedSlot] then return end autoTpActive = not autoTpActive AutoTPButton.Text = autoTpActive and "Auto-TP: ON" or "Auto-TP: OFF" AutoTPButton.BackgroundColor3 = autoTpActive and Color3.fromRGB(200, 50, 50) or Color3.fromRGB(60, 60, 65) if autoTpActive then autoTpConnection = RunService.Heartbeat:Connect(function() if autoTpActive and savedPositions[currentSelectedSlot] and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then player.Character.HumanoidRootPart.CFrame = savedPositions[currentSelectedSlot] end end) else if autoTpConnection then autoTpConnection:Disconnect() end end end)
+
+-- Initialisierung der Positionen / Autostart
+local datenGefunden = ladePunkteAusDatei()
+if datenGefunden then
+    aktualisiereAlles()
     task.spawn(function()
         task.wait(1.5)
-        if not settings.farmActive then triggerFarmStart() end
+        if not laeuft then triggerStart() end
     end)
+    print("Alte Positionen geladen und Auto-Start aktiviert!")
 end
+
+loadSettings()
+print("Universal Notix Hub - Red Edition vollständig geladen!")
