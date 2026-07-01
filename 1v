@@ -285,11 +285,58 @@ TabBar:GetChildren()[2].TextColor3 = Color3.fromRGB(200, 50, 50)
 -- UNIVERSAL TOGGLES (Immer sichtbar)
 -- ==========================================
 
+-- ==========================================
+-- KORRIGIERTE ESP LOGIK
+-- ==========================================
+local function applyHighlight(targetPlayer)
+    if targetPlayer == player or not targetPlayer.Character then return end
+    
+    local char = targetPlayer.Character
+    local highlight = char:FindFirstChild("EspHighlight") or Instance.new("Highlight")
+    
+    highlight.Name = "EspHighlight"
+    highlight.Adornee = char
+    highlight.FillColor = Color3.fromRGB(255, 50, 50)
+    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+    highlight.FillTransparency = 0.5
+    highlight.Enabled = settings.playerEspActive
+    highlight.Parent = char
+    
+    espHighlights[targetPlayer] = highlight
+end
+
 createToggle(playerPage, "playerEspActive", "Player ESP", 1, function(state)
-    for p, highlight in pairs(espHighlights) do
-        if highlight and highlight.Parent then highlight.Enabled = state else espHighlights[p] = nil end
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= player then
+            if p.Character then
+                local highlight = p.Character:FindFirstChild("EspHighlight")
+                if highlight then
+                    highlight.Enabled = state
+                elseif state then
+                    applyHighlight(p)
+                end
+            end
+        end
     end
 end)
+
+-- Listener für neue Spieler und Respawns
+Players.PlayerAdded:Connect(function(newPlayer)
+    newPlayer.CharacterAdded:Connect(function(char)
+        task.wait(1) -- Warten, bis Charakter geladen ist
+        applyHighlight(newPlayer)
+    end)
+end)
+
+-- Initiales Setup für Spieler, die bereits da sind
+for _, p in pairs(Players:GetPlayers()) do
+    applyHighlight(p)
+    p.CharacterAdded:Connect(function()
+        task.wait(1)
+        applyHighlight(p)
+    end)
+end
+-- ==========================================
 
 createToggle(playerPage, "speedSystemActive", "Speed Custom", 2, function(state)
     local SpeedUiFrame = ScreenGui:FindFirstChild("SpeedUiFrame")
